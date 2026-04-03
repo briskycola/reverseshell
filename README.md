@@ -6,7 +6,6 @@ pseudo-terminal (PTY), and relay input/output between the remote
 system and operator. This project includes the reverse shell
 client program and the listening program, with support for
 features such as raw mode handling and window size changing.
-[![Demo](demo.png)](demo.mp4)
 
 ## LEGAL DISCLAIMER
 This project is intended for educational purposes and authorized
