@@ -6,6 +6,7 @@ pseudo-terminal (PTY), and relay input/output between the remote
 system and operator. This project includes the reverse shell
 client program and the listening program, with support for
 features such as raw mode handling and window size changing.
+[![Demo](demo.png)](demo.mp4)
 
 ## LEGAL DISCLAIMER
 This project is intended for educational purposes and authorized
@@ -16,8 +17,9 @@ proper authorization before use.
 
 ## Building
 This program is designed to run on Linux and macOS systems.
-On Windows, it can be used through the [MSYS2](https://www.msys2.org/).
-compatibility layer. Here are the build instructions for each operating system:
+On Windows, it can be used through compatibility layers such as
+[MSYS2](https://www.msys2.org/) or [Cygwin](https://cygwin.com/).
+Here are the build instructions for each operating system:
 
 - [Linux](BUILD_LINUX.md)
 - [macOS](BUILD_MACOS.md)
