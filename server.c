@@ -98,6 +98,7 @@ void monitor_fd(int client_fd)
     // that will be used for waiting for
     // input and output
     pollfd fds[2];
+    nfds_t ndfs = 2;
 
     // Store the amount of data read
     // from the socket (not the data itself)
@@ -124,7 +125,7 @@ void monitor_fd(int client_fd)
     {
         // Waiting for an event from the
         // file descriptors
-        if (poll(fds, 2, -1) < 0)
+        if (poll(fds, ndfs, -1) < 0)
         {
             // Check for any interrupts
             // from the OS and ignore them
